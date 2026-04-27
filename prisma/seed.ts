@@ -1,8 +1,7 @@
 import { PrismaClient } from "@prisma/client";
+import { auth } from "../src/lib/auth";
 
 const prisma = new PrismaClient();
-
-const DEMO_USER_ID = "user_demo";
 
 const MENU_SEED = [
   { name: "Chicken Biryani", description: "Slow-cooked basmati with chicken and saffron", priceCents: 350, category: "main", available: true },
@@ -17,8 +16,23 @@ const MENU_SEED = [
   { name: "Banana Chips", description: "Kerala style, lightly salted", priceCents: 70, category: "snack", available: true },
 ];
 
+const USERS_SEED = [
+  { name: "Asha Patel",   email: "asha@example.com",   password: "asha-password-1" },
+  { name: "Ravi Kumar",   email: "ravi@example.com",   password: "ravi-password-1" },
+  { name: "Maya Iyer",    email: "maya@example.com",   password: "maya-password-1" },
+];
+
+async function ensureUser(u: (typeof USERS_SEED)[number]) {
+  const existing = await prisma.user.findUnique({ where: { email: u.email } });
+  if (existing) return existing;
+  const res = await auth.api.signUpEmail({
+    body: { email: u.email, password: u.password, name: u.name },
+  });
+  return prisma.user.findUniqueOrThrow({ where: { email: res.user.email } });
+}
+
 async function main() {
-  console.log("Resetting menu, orders, items…");
+  console.log("Resetting orders & menu…");
   await prisma.orderItem.deleteMany();
   await prisma.order.deleteMany();
   await prisma.menuItem.deleteMany();
@@ -28,16 +42,25 @@ async function main() {
     await prisma.menuItem.create({ data: item });
   }
 
+  console.log("Seeding users (idempotent — keeps existing accounts)…");
+  const users = [];
+  for (const u of USERS_SEED) {
+    const user = await ensureUser(u);
+    console.log(`  ✓ ${user.email} (id=${user.id})`);
+    users.push(user);
+  }
+
   const menu = await prisma.menuItem.findMany();
   const biryani = menu.find((m) => m.name === "Chicken Biryani")!;
   const chai = menu.find((m) => m.name === "Masala Chai")!;
   const dosa = menu.find((m) => m.name === "Masala Dosa")!;
   const samosa = menu.find((m) => m.name === "Samosa")!;
 
-  console.log("Seeding sample orders…");
+  console.log("Seeding sample orders for first user…");
+  const [primary] = users;
   await prisma.order.create({
     data: {
-      userId: DEMO_USER_ID,
+      userId: primary.id,
       status: "ready",
       totalCents: biryani.priceCents + chai.priceCents,
       notes: "less spicy please",
@@ -52,7 +75,7 @@ async function main() {
 
   await prisma.order.create({
     data: {
-      userId: DEMO_USER_ID,
+      userId: primary.id,
       status: "pending",
       totalCents: dosa.priceCents + samosa.priceCents * 2,
       items: {
@@ -65,11 +88,16 @@ async function main() {
   });
 
   const counts = {
+    users: await prisma.user.count(),
     menu: await prisma.menuItem.count(),
     orders: await prisma.order.count(),
     items: await prisma.orderItem.count(),
   };
   console.log("Done:", counts);
+  console.log("Try signing in as:");
+  for (const u of USERS_SEED) {
+    console.log(`  ${u.email}  /  ${u.password}`);
+  }
 }
 
 main()

@@ -1,7 +1,13 @@
 import { NextRequest, NextResponse } from "next/server";
+import { auth } from "@/lib/auth";
 
 export type AuthContext = {
   userId: string;
+  user: {
+    id: string;
+    email: string;
+    name: string;
+  };
 };
 
 type Handler = (
@@ -11,17 +17,23 @@ type Handler = (
 ) => Promise<NextResponse>;
 
 /**
- * withAuth — minimal auth wrapper for the workshop.
- *
- * In a real app this validates a session cookie / JWT.
- * For the workshop we read `x-user-id` header and reject if missing.
+ * withAuth — resolves the better-auth session from the request cookies and
+ * passes the authenticated user to the handler. Returns 401 if no session.
  */
 export function withAuth(handler: Handler) {
   return async (req: NextRequest, ctx?: any) => {
-    const userId = req.headers.get("x-user-id");
-    if (!userId) {
+    const session = await auth.api.getSession({ headers: req.headers });
+    if (!session?.user) {
       return NextResponse.json({ error: "unauthenticated" }, { status: 401 });
     }
-    return handler(req, { userId }, ctx);
+    const authCtx: AuthContext = {
+      userId: session.user.id,
+      user: {
+        id: session.user.id,
+        email: session.user.email,
+        name: session.user.name,
+      },
+    };
+    return handler(req, authCtx, ctx);
   };
 }

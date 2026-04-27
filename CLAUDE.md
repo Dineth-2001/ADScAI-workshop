@@ -12,13 +12,14 @@ This file is read at the start of every Claude Code session in this repo.
 
 ## Codebase Patterns (CRITICAL)
 
-- **Auth wrappers required.** Every API route handler must be wrapped in `withAuth` from `@/lib/auth/wrappers`. The `canteen-route-protection` skill covers the rule in detail.
+- **Auth via better-auth.** Email/password sessions are managed by [better-auth](https://better-auth.com). The mounted catch-all lives at `src/app/api/auth/[...all]/route.ts`. Server code reads the session with `auth.api.getSession({ headers })`; client code uses the helpers from `@/lib/auth/client`.
+- **Auth wrappers required.** Every protected API route handler must be wrapped in `withAuth` from `@/lib/auth/wrappers`. The `canteen-route-protection` skill covers the rule in detail.
 - **Service layer.** API routes never call Prisma directly. They delegate to a service in `src/lib/services/`.
 - **Validate at the boundary.** Routes handle HTTP concerns (parsing, status codes, validation). Business logic lives in services.
 
 ## Things to Avoid
 
-- Never bypass `withAuth` — use the lint suppression escape hatch only with reviewer approval.
+- Never bypass `withAuth` — the lint suppression escape hatch is reserved for the auth catch-all and intentionally public reads (e.g. the menu) and needs reviewer sign-off.
 - Never call `prisma.X.*` from a route handler.
 - Never commit secrets — `.env.local` is git-ignored.
 

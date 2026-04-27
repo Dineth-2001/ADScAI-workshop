@@ -1,3 +1,4 @@
+
 generator client {
   provider = "prisma-client-js"
 }
@@ -12,33 +13,100 @@ model MenuItem {
   name        String
   description String?
   priceCents  Int
-  category    String   // e.g. "main", "drink", "snack"
+  category    String // e.g. "main", "drink", "snack"
   available   Boolean  @default(true)
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 
-  orderItems  OrderItem[]
+  orderItems OrderItem[]
 }
 
 model Order {
-  id           String      @id @default(cuid())
-  userId       String      // simple string id for the workshop — no full auth model
-  status       String      @default("pending")  // "pending" | "ready" | "picked_up"
-  totalCents   Int
-  notes        String?
-  createdAt    DateTime    @default(now())
-  updatedAt    DateTime    @updatedAt
+  id         String   @id @default(cuid())
+  userId     String
+  status     String   @default("pending") // "pending" | "ready" | "picked_up"
+  totalCents Int
+  notes      String?
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
 
-  items        OrderItem[]
+  user  User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  items OrderItem[]
+
+  @@index([userId])
 }
 
 model OrderItem {
-  id             String   @id @default(cuid())
+  id             String @id @default(cuid())
   orderId        String
   menuItemId     String
   quantity       Int
   unitPriceCents Int
 
-  order          Order    @relation(fields: [orderId], references: [id], onDelete: Cascade)
-  menuItem       MenuItem @relation(fields: [menuItemId], references: [id])
+  order    Order    @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  menuItem MenuItem @relation(fields: [menuItemId], references: [id])
+}
+
+model User {
+  id            String    @id
+  name          String
+  email         String
+  emailVerified Boolean   @default(false)
+  image         String?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+  sessions      Session[]
+  accounts      Account[]
+  orders        Order[]
+
+  @@unique([email])
+  @@map("user")
+}
+
+model Session {
+  id        String   @id
+  expiresAt DateTime
+  token     String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  ipAddress String?
+  userAgent String?
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([token])
+  @@index([userId])
+  @@map("session")
+}
+
+model Account {
+  id                    String    @id
+  accountId             String
+  providerId            String
+  userId                String
+  user                  User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  accessToken           String?
+  refreshToken          String?
+  idToken               String?
+  accessTokenExpiresAt  DateTime?
+  refreshTokenExpiresAt DateTime?
+  scope                 String?
+  password              String?
+  createdAt             DateTime  @default(now())
+  updatedAt             DateTime  @updatedAt
+
+  @@index([userId])
+  @@map("account")
+}
+
+model Verification {
+  id         String   @id
+  identifier String
+  value      String
+  expiresAt  DateTime
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  @@index([identifier])
+  @@map("verification")
 }

@@ -27,19 +27,39 @@ module.exports = {
 
         if (decl.type === "VariableDeclaration") {
           for (const v of decl.declarations) {
-            if (v.id.type !== "Identifier" || !HTTP_VERBS.has(v.id.name)) continue;
-            const init = v.init;
-            const isWrapped =
-              init &&
-              init.type === "CallExpression" &&
-              init.callee.type === "Identifier" &&
-              init.callee.name === "withAuth";
-            if (!isWrapped) {
-              context.report({
-                node: v,
-                messageId: "missing",
-                data: { name: v.id.name },
-              });
+            if (v.id.type === "Identifier" && HTTP_VERBS.has(v.id.name)) {
+              const init = v.init;
+              const isWrapped =
+                init &&
+                init.type === "CallExpression" &&
+                init.callee.type === "Identifier" &&
+                init.callee.name === "withAuth";
+              if (!isWrapped) {
+                context.report({
+                  node: v,
+                  messageId: "missing",
+                  data: { name: v.id.name },
+                });
+              }
+              continue;
+            }
+            // `export const { GET, POST } = handler()` — destructured form. The
+            // initialiser is a single value shared by every name on the LHS, so
+            // there is no per-name `withAuth` call. Flag every HTTP verb key.
+            if (v.id.type === "ObjectPattern") {
+              for (const prop of v.id.properties) {
+                if (
+                  prop.type === "Property" &&
+                  prop.key.type === "Identifier" &&
+                  HTTP_VERBS.has(prop.key.name)
+                ) {
+                  context.report({
+                    node: prop,
+                    messageId: "missing",
+                    data: { name: prop.key.name },
+                  });
+                }
+              }
             }
           }
           return;

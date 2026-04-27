@@ -1,21 +1,27 @@
+import { headers } from "next/headers";
+import { redirect } from "next/navigation";
+import { auth } from "@/lib/auth";
 import { OrderService } from "@/lib/services/order";
 
 export const dynamic = "force-dynamic";
-
-const DEMO_USER_ID = "user_demo";
 
 function formatPrice(cents: number) {
   return `₹${(cents / 100).toFixed(2)}`;
 }
 
 export default async function OrdersPage() {
-  const orders = await OrderService.listForUser(DEMO_USER_ID);
+  const session = await auth.api.getSession({ headers: await headers() });
+  if (!session?.user) {
+    redirect("/login");
+  }
+
+  const orders = await OrderService.listForUser(session.user.id);
 
   return (
     <section>
       <h2>Your orders</h2>
       <p style={{ fontSize: "0.85rem", color: "#666" }}>
-        Showing orders for demo user <code>{DEMO_USER_ID}</code>.
+        Signed in as <strong>{session.user.email}</strong>.
       </p>
       {orders.length === 0 && <p>No orders yet.</p>}
       {orders.map((order) => (
