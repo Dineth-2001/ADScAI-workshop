@@ -15,25 +15,81 @@ model MenuItem {
   priceCents  Int
   category    String // e.g. "main", "drink", "snack"
   available   Boolean  @default(true)
+  stockQuantity Int     @default(0)
+  allergenInfo String?
+  dietaryNotes String?
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 
   orderItems OrderItem[]
 }
 
+model PickupWindow {
+  id            String   @id @default(cuid())
+  startTime     DateTime
+  endTime       DateTime
+  capacity      Int      @default(15)
+  reservedCount Int      @default(0)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  orders Order[]
+
+  @@unique([startTime, endTime])
+  @@index([startTime])
+}
+
 model Order {
   id         String   @id @default(cuid())
   userId     String
-  status     String   @default("pending") // "pending" | "ready" | "picked_up"
+  pickupWindowId String
+  status     String   @default("pending") // "pending" | "preparing" | "ready" | "handed_off" | "canceled" | "no_show"
   totalCents Int
   notes      String?
+  paidAt     DateTime?
+  orderCode  String
+  refundedAt DateTime?
   createdAt  DateTime @default(now())
   updatedAt  DateTime @updatedAt
 
   user  User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  pickupWindow PickupWindow @relation(fields: [pickupWindowId], references: [id])
   items OrderItem[]
+  notifications Notification[]
+  deduplication OrderDeduplication?
 
   @@index([userId])
+  @@index([pickupWindowId])
+}
+
+model OrderDeduplication {
+  id        String   @id @default(cuid())
+  userId    String
+  sessionId String
+  cartHash  String
+  orderId   String
+  createdAt DateTime @default(now())
+
+  user  User  @relation(fields: [userId], references: [id], onDelete: Cascade)
+  order Order @relation(fields: [orderId], references: [id], onDelete: Cascade)
+
+  @@unique([orderId])
+  @@index([userId, sessionId, cartHash, createdAt])
+}
+
+model Notification {
+  id        String   @id @default(cuid())
+  userId    String
+  orderId   String?
+  type      String
+  message   String
+  createdAt DateTime @default(now())
+  readAt    DateTime?
+
+  user  User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  order Order? @relation(fields: [orderId], references: [id], onDelete: Cascade)
+
+  @@index([userId, readAt, createdAt])
 }
 
 model OrderItem {
@@ -58,6 +114,8 @@ model User {
   sessions      Session[]
   accounts      Account[]
   orders        Order[]
+  notifications Notification[]
+  orderDeduplications OrderDeduplication[]
 
   @@unique([email])
   @@map("user")
