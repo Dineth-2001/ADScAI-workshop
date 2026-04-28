@@ -1,2 +1,7 @@
-// Placeholder for the orders integration test suite.
-// Students wire this up during the workshop once a test database is provisioned.
+import { describe, it } from "vitest";
+
+describe.skip("orders API (workshop placeholder)", () => {
+	it("is intentionally skipped until a test DB is provisioned", () => {
+		// no-op
+	});
+});

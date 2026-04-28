@@ -2,6 +2,8 @@ import { headers } from "next/headers";
 import { redirect } from "next/navigation";
 import { auth } from "@/lib/auth";
 import { OrderService } from "@/lib/services/order";
+import { OrderActions } from "./_components/order-actions";
+import { NotificationService } from "@/lib/services/notification";
 
 export const dynamic = "force-dynamic";
 
@@ -21,10 +23,16 @@ function formatDate(d: Date) {
 function badgeClass(status: string) {
   const s = status.toLowerCase();
   if (s === "pending") return "badge badge-pending";
+  if (s === "preparing") return "badge badge-pending";
   if (s === "ready") return "badge badge-ready";
-  if (s === "picked_up" || s === "collected" || s === "completed") return "badge badge-collected";
+  if (s === "handed_off" || s === "picked_up" || s === "collected" || s === "completed") return "badge badge-collected";
   if (s === "cancelled" || s === "canceled") return "badge badge-cancelled";
+  if (s === "no_show") return "badge badge-cancelled";
   return "badge";
+}
+
+function formatTime(d: Date) {
+  return new Date(d).toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" });
 }
 
 export default async function OrdersPage() {
@@ -33,7 +41,10 @@ export default async function OrdersPage() {
     redirect("/login");
   }
 
+  await OrderService.autoMarkNoShows(new Date());
+
   const orders = await OrderService.listForUser(session.user.id);
+  const notifications = await NotificationService.listForUser(session.user.id, 5);
 
   return (
     <section>
@@ -43,6 +54,21 @@ export default async function OrdersPage() {
           Signed in as <strong style={{ color: "var(--text)" }}>{session.user.email}</strong>.
         </p>
       </div>
+
+      {notifications.length > 0 && (
+        <div className="card" style={{ padding: "1rem 1.25rem", marginBottom: "1.25rem" }}>
+          <div style={{ fontSize: "0.75rem", color: "var(--muted)", textTransform: "uppercase", letterSpacing: "0.05em" }}>
+            Notifications
+          </div>
+          <ul style={{ margin: "0.5rem 0 0", padding: 0, listStyle: "none", display: "grid", gap: "0.35rem" }}>
+            {notifications.map((n) => (
+              <li key={n.id} style={{ fontSize: "0.9rem" }}>
+                {n.message}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
 
       {orders.length === 0 && (
         <div
@@ -92,6 +118,12 @@ export default async function OrdersPage() {
                 <div style={{ fontSize: "0.8rem", color: "var(--muted)", marginTop: 3 }}>
                   {formatDate(order.createdAt)}
                 </div>
+                <div style={{ fontSize: "0.8rem", color: "var(--muted)", marginTop: 3 }}>
+                  Pickup: {formatTime(order.pickupWindow.startTime)}–{formatTime(order.pickupWindow.endTime)}
+                </div>
+                <div style={{ fontSize: "0.8rem", color: "var(--muted)", marginTop: 3 }}>
+                  Code: <strong style={{ color: "var(--text)", fontVariantNumeric: "tabular-nums" }}>{order.orderCode}</strong>
+                </div>
               </div>
               <div style={{ textAlign: "right" }}>
                 <div style={{ fontSize: "0.75rem", color: "var(--muted)", textTransform: "uppercase", letterSpacing: "0.05em" }}>
@@ -138,6 +170,12 @@ export default async function OrdersPage() {
                 <strong style={{ color: "var(--text)" }}>Notes:</strong> {order.notes}
               </p>
             )}
+
+            <OrderActions
+              orderId={order.id}
+              status={order.status}
+              pickupWindowStartTime={order.pickupWindow.startTime.toISOString()}
+            />
           </article>
         ))}
       </div>

@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useSession } from "@/lib/auth/client";
 
@@ -11,6 +11,8 @@ type MenuItem = {
   priceCents: number;
   category: string;
   available: boolean;
+  allergenInfo?: string | null;
+  dietaryNotes?: string | null;
 };
 
 type Cart = Record<string, number>;
@@ -33,6 +35,48 @@ export function MenuClient({ items }: { items: MenuItem[] }) {
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [successId, setSuccessId] = useState<string | null>(null);
+  const [checkoutOpen, setCheckoutOpen] = useState(false);
+  const [notes, setNotes] = useState("");
+  const [windowsLoading, setWindowsLoading] = useState(false);
+  const [windowsError, setWindowsError] = useState<string | null>(null);
+  const [windows, setWindows] = useState<
+    | null
+    | {
+        suggestedWindowId: string | null;
+        windows: Array<{
+          id: string;
+          startTime: string;
+          endTime: string;
+          capacity: number;
+          reservedCount: number;
+          remaining: number;
+        }>;
+      }
+  >(null);
+  const [selectedWindowId, setSelectedWindowId] = useState<string | null>(null);
+
+  const loggedIn = !!session?.user;
+
+  function getCheckoutSessionId() {
+    try {
+      const key = "canteen.checkoutSessionId";
+      const existing = localStorage.getItem(key);
+      if (existing) return existing;
+      const id = typeof crypto !== "undefined" && "randomUUID" in crypto ? crypto.randomUUID() : `${Date.now()}-${Math.random()}`;
+      localStorage.setItem(key, id);
+      return id;
+    } catch {
+      return `${Date.now()}-${Math.random()}`;
+    }
+  }
+
+  function formatTimeRange(startIso: string, endIso: string) {
+    const start = new Date(startIso);
+    const end = new Date(endIso);
+    const startStr = start.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" });
+    const endStr = end.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" });
+    return `${startStr}–${endStr}`;
+  }
 
   const byCategory = useMemo(() => {
     return items.reduce<Record<string, MenuItem[]>>((acc, item) => {
@@ -49,6 +93,7 @@ export function MenuClient({ items }: { items: MenuItem[] }) {
 
   function setQty(id: string, qty: number) {
     setSuccessId(null);
+    setCheckoutOpen(false);
     setCart((prev) => {
       const next = { ...prev };
       if (qty <= 0) delete next[id];
@@ -57,7 +102,42 @@ export function MenuClient({ items }: { items: MenuItem[] }) {
     });
   }
 
+  useEffect(() => {
+    if (!checkoutOpen) return;
+    if (!loggedIn) return;
+
+    let cancelled = false;
+    async function run() {
+      setWindowsLoading(true);
+      setWindowsError(null);
+      try {
+        const res = await fetch("/api/pickup-windows");
+        if (!res.ok) {
+          const body = await res.json().catch(() => ({}));
+          throw new Error(body.error || `Failed (${res.status})`);
+        }
+        const data = await res.json();
+        if (cancelled) return;
+        setWindows(data);
+        setSelectedWindowId(data.suggestedWindowId);
+      } catch (e) {
+        if (cancelled) return;
+        setWindowsError(e instanceof Error ? e.message : "Failed to load pickup windows");
+      } finally {
+        if (!cancelled) setWindowsLoading(false);
+      }
+    }
+    run();
+    return () => {
+      cancelled = true;
+    };
+  }, [checkoutOpen, loggedIn]);
+
   async function placeOrder() {
+    if (!selectedWindowId) {
+      setError("Select a pickup window to continue");
+      return;
+    }
     setSubmitting(true);
     setError(null);
     try {
@@ -69,6 +149,9 @@ export function MenuClient({ items }: { items: MenuItem[] }) {
             menuItemId,
             quantity,
           })),
+          pickupWindowId: selectedWindowId,
+          checkoutSessionId: getCheckoutSessionId(),
+          notes: notes || undefined,
         }),
       });
       if (!res.ok) {
@@ -77,6 +160,10 @@ export function MenuClient({ items }: { items: MenuItem[] }) {
       }
       const order = await res.json();
       setCart({});
+      setCheckoutOpen(false);
+      setNotes("");
+      setWindows(null);
+      setSelectedWindowId(null);
       setSuccessId(order.id);
       router.refresh();
     } catch (e) {
@@ -85,8 +172,6 @@ export function MenuClient({ items }: { items: MenuItem[] }) {
       setSubmitting(false);
     }
   }
-
-  const loggedIn = !!session?.user;
 
   return (
     <section>
@@ -178,6 +263,12 @@ export function MenuClient({ items }: { items: MenuItem[] }) {
                     {item.description && (
                       <div style={{ fontSize: "0.85rem", color: "var(--muted)", marginTop: 3, lineHeight: 1.4 }}>
                         {item.description}
+                      </div>
+                    )}
+                    {(item.allergenInfo || item.dietaryNotes) && (
+                      <div style={{ fontSize: "0.78rem", color: "var(--muted)", marginTop: 6, lineHeight: 1.35 }}>
+                        {item.dietaryNotes && <span style={{ marginRight: 10 }}><strong>Diet:</strong> {item.dietaryNotes}</span>}
+                        {item.allergenInfo && <span><strong>Allergens:</strong> {item.allergenInfo}</span>}
                       </div>
                     )}
                     {!item.available && (
@@ -287,9 +378,125 @@ export function MenuClient({ items }: { items: MenuItem[] }) {
               </strong>
             </div>
           </div>
-          <button type="button" onClick={placeOrder} disabled={submitting} className="btn btn-light">
-            {submitting ? "Placing…" : "Place order →"}
+          <button
+            type="button"
+            onClick={() => {
+              if (!loggedIn) {
+                router.push("/login");
+                return;
+              }
+              setCheckoutOpen((v) => !v);
+            }}
+            disabled={submitting}
+            className="btn btn-light"
+          >
+            {checkoutOpen ? "Close" : "Checkout →"}
           </button>
+        </div>
+      )}
+
+      {checkoutOpen && totalCount > 0 && (
+        <div className="card" style={{ padding: "1.1rem 1.25rem", marginTop: "1rem" }}>
+          <h3 style={{ margin: 0, fontSize: "1.05rem" }}>Checkout</h3>
+          <p style={{ margin: "0.25rem 0 1rem", color: "var(--muted)", fontSize: "0.9rem" }}>
+            Select a 15‑minute pickup window (next 2 hours) and pay to reserve your items.
+          </p>
+
+          {windowsError && (
+            <div
+              style={{
+                background: "var(--danger-soft)",
+                border: "1px solid var(--danger)",
+                color: "var(--danger)",
+                padding: "0.75rem 0.9rem",
+                borderRadius: "var(--radius)",
+                marginBottom: "0.85rem",
+                fontSize: "0.9rem",
+              }}
+            >
+              {windowsError}
+            </div>
+          )}
+
+          {windowsLoading && <div style={{ color: "var(--muted)", fontSize: "0.9rem" }}>Loading pickup windows…</div>}
+
+          {!windowsLoading && windows && windows.windows.length === 0 && (
+            <div
+              style={{
+                background: "var(--warning-soft)",
+                border: "1px solid var(--warning)",
+                color: "var(--warning)",
+                padding: "0.75rem 0.9rem",
+                borderRadius: "var(--radius)",
+                marginBottom: "0.85rem",
+                fontSize: "0.9rem",
+              }}
+            >
+              All pickup windows for the next 2 hours are full. Try again later or pre‑order for the next day.
+            </div>
+          )}
+
+          {!windowsLoading && windows && windows.windows.length > 0 && (
+            <div style={{ display: "grid", gap: "0.5rem", marginBottom: "0.85rem" }}>
+              {windows.windows.map((w) => {
+                const suggested = windows.suggestedWindowId === w.id;
+                return (
+                  <label
+                    key={w.id}
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "space-between",
+                      gap: "0.75rem",
+                      padding: "0.7rem 0.75rem",
+                      border: "1px solid var(--border)",
+                      borderRadius: "var(--radius-sm)",
+                      background: selectedWindowId === w.id ? "var(--brand-soft)" : "white",
+                    }}
+                  >
+                    <span style={{ display: "flex", alignItems: "center", gap: "0.6rem" }}>
+                      <input
+                        type="radio"
+                        name="pickupWindow"
+                        value={w.id}
+                        checked={selectedWindowId === w.id}
+                        onChange={() => setSelectedWindowId(w.id)}
+                      />
+                      <span style={{ fontWeight: 600 }}>{formatTimeRange(w.startTime, w.endTime)}</span>
+                      {suggested && (
+                        <span className="badge" style={{ background: "var(--success-soft)", color: "var(--success)" }}>
+                          Suggested
+                        </span>
+                      )}
+                    </span>
+                    <span style={{ color: "var(--muted)", fontSize: "0.85rem" }}>{w.remaining} left</span>
+                  </label>
+                );
+              })}
+            </div>
+          )}
+
+          <div style={{ marginBottom: "0.9rem" }}>
+            <label style={{ display: "block", fontSize: "0.85rem", fontWeight: 600, marginBottom: 6 }}>
+              Notes (dietary / allergen)
+            </label>
+            <textarea
+              className="input"
+              rows={3}
+              value={notes}
+              onChange={(e) => setNotes(e.target.value)}
+              placeholder="e.g. no peanuts, less spicy"
+            />
+          </div>
+
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: "1rem" }}>
+            <div style={{ color: "var(--muted)", fontSize: "0.85rem" }}>
+              Payment method: <strong style={{ color: "var(--text)" }}>Card</strong> (demo)
+            </div>
+            <button type="button" onClick={placeOrder} disabled={submitting || !selectedWindowId} className="btn btn-primary">
+              {submitting ? "Paying…" : "Pay & place order"}
+            </button>
+          </div>
         </div>
       )}
     </section>
